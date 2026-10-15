@@ -1,0 +1,30 @@
+{
+  "name": "storage_gateway",
+  "display_name": "Storage Gateway",
+  "icon": "icon.png",
+  "version": "0.1.0",
+  "type": "core",
+  "interface": "universal",
+  "category": "protocol",
+  "description": "The storage_module API, served by a Logos Storage node elsewhere (its REST API, e.g. over a mesh or VPN)",
+  "main": "storage_gateway_plugin",
+  "codegen": {
+    "impl_header": "storage_gateway_impl.h"
+  },
+  "dependencies": [],
+  "nix": {
+    "packages": {
+      "build": [],
+      "runtime": []
+    },
+    "external_libraries": [],
+    "cmake": {
+      "find_packages": [],
+      "extra_sources": [],
+      "extra_include_dirs": [
+        "src"
+      ],
+      "extra_link_libraries": []
+    }
+  }
+}
