@@ -16,7 +16,7 @@
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 
-static const char* kVersion = "0.1.0";
+static const char* kVersion = "0.1.1";
 static const char* kApiBase = "/api/storage/v1";
 static const int kDefaultTimeoutMs = 20000;
 // Transfers: a big file, a slow node or a fetch from the network take long between bytes.
@@ -141,7 +141,7 @@ static std::string newId()
 static std::string mimeFor(const std::string& name)
 {
     static const std::map<std::string, std::string> m = {
-        {".txt", "text/plain"}, {".md", "text/markdown"}, {".html", "text/html"}, {".htm", "text/html"},
+        {".txt", "text/plain"}, {".md", "text/plain"}, {".html", "text/html"}, {".htm", "text/html"},
         {".css", "text/css"}, {".csv", "text/csv"}, {".json", "application/json"}, {".js", "text/javascript"},
         {".xml", "application/xml"}, {".pdf", "application/pdf"}, {".zip", "application/zip"},
         {".gz", "application/gzip"}, {".tar", "application/x-tar"}, {".png", "image/png"},
@@ -452,31 +452,38 @@ static std::pair<std::string, std::string> postFile(const std::shared_ptr<Gatewa
     std::error_code ec;
     const auto total = (int64_t)fs::file_size(path, ec);
     if (ec) return {"", "Cannot read " + path + ": " + ec.message()};
-    auto in = std::make_shared<std::ifstream>(path, std::ios::binary);
-    if (!*in) return {"", "Cannot open " + path};
-    httplib::Headers h = {{"Content-Disposition", "attachment; filename=\"" + dispositionName(filename) + "\""}};
-    auto cl = client(c, kTransferTimeoutMs);
-    int lastPct = -1;
     std::vector<char> buf(std::max<size_t>(chunkSize, 4096));
-    auto r = cl->Post(c.base + std::string("/data?advertise=") + (advertise ? "true" : "false"), h, (size_t)total,
-        [&](size_t offset, size_t length, httplib::DataSink& sink) {
-            if (sess->cancel) return false;
-            const size_t n = std::min(length, buf.size());
-            in->seekg((std::streamoff)offset);
-            in->read(buf.data(), (std::streamsize)n);
-            const auto got = (size_t)in->gcount();
-            if (got == 0) return false;
-            if (!sink.write(buf.data(), got)) return false;
-            const int64_t done = (int64_t)(offset + got);
-            const int p = total > 0 ? (int)(done * 100 / total) : 100;
-            if (reportProgress && p != lastPct) {
-                lastPct = p;
-                emitEvent(s, &StorageGatewayImpl::storageUploadProgress,
-                          {{"success", true}, {"sessionId", sessionId}, {"bytes", done}, {"total", total}});
-            }
-            return true;
-        },
-        mimeFor(filename));
+    // The node checks the type against its own list (Nim's std/mimetypes, which lacks e.g. text/markdown)
+    // and refuses one it doesn't know with 422: then once more without a type.
+    httplib::Result r;
+    for (const std::string& type : {mimeFor(filename), std::string()}) {
+        auto in = std::make_shared<std::ifstream>(path, std::ios::binary);
+        if (!*in) return {"", "Cannot open " + path};
+        httplib::Headers h = {{"Content-Disposition", "attachment; filename=\"" + dispositionName(filename) + "\""}};
+        auto cl = client(c, kTransferTimeoutMs);
+        int lastPct = -1;
+        r = cl->Post(c.base + std::string("/data?advertise=") + (advertise ? "true" : "false"), h, (size_t)total,
+            [&](size_t offset, size_t length, httplib::DataSink& sink) {
+                if (sess->cancel) return false;
+                const size_t n = std::min(length, buf.size());
+                in->seekg((std::streamoff)offset);
+                in->read(buf.data(), (std::streamsize)n);
+                const auto got = (size_t)in->gcount();
+                if (got == 0) return false;
+                if (!sink.write(buf.data(), got)) return false;
+                const int64_t done = (int64_t)(offset + got);
+                const int p = total > 0 ? (int)(done * 100 / total) : 100;
+                if (reportProgress && p != lastPct) {
+                    lastPct = p;
+                    emitEvent(s, &StorageGatewayImpl::storageUploadProgress,
+                              {{"success", true}, {"sessionId", sessionId}, {"bytes", done}, {"total", total}});
+                }
+                return true;
+            },
+            type);
+        const bool badType = r && r->status == 422 && r->body.find("MIME") != std::string::npos;
+        if (!badType || type.empty() || sess->cancel) break;
+    }
     if (sess->cancel) return {"", "Cancelled."};
     if (!ok(r)) return {"", failure(c, r)};
     std::string cid = r->body;

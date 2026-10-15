@@ -2,7 +2,7 @@
   "name": "storage_gateway",
   "display_name": "Storage Gateway",
   "icon": "icon.png",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "core",
   "interface": "universal",
   "category": "protocol",
